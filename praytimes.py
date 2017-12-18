@@ -1,4 +1,6 @@
 #!/usr/bin/env python
+#-*- coding: utf-8 -*-
+
 # compatible with python 2.x and 3.x
 
 import math
