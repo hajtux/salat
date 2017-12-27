@@ -6,6 +6,7 @@
 import math
 import re
 from ipinfo import IpInfo
+from datetime import datetime, timedelta
 
 '''
 --------------------- Copyright Block ----------------------
@@ -58,7 +59,7 @@ http://praytimes.org/calculation
 	>>> times = PT.getTimes((2011, 2, 9), (43, -80), -5)
 	>>> times['sunrise']
 	07:26
-	
+
 '''
 
 #----------------------- PrayTimes Class ------------------------
@@ -114,11 +115,11 @@ class PrayTimes():
 		'maghrib': '0 min', 'midnight': 'Standard'
 	}
 
-	
+
 	#---------------------- Default Settings --------------------
 
 	calcMethod = 'MWL'
-	
+
 	# do not change anything here; use adjust method instead
 	settings = {
 		"imsak"    : '10 min',
@@ -126,7 +127,7 @@ class PrayTimes():
 		"asr"      : 'Standard',
 		"highLats" : 'NightMiddle'
 	}
-	
+
 	timeFormat = '24h'
 	timeSuffixes = ['am', 'pm']
 	invalidTime =  '-----'
@@ -167,13 +168,13 @@ class PrayTimes():
 
 	def tune(self, timeOffsets):
 		self.offsets.update(timeOffsets)
-			
+
 	def getMethod(self):
 		return self.calcMethod
 
 	def getSettings(self):
 		return self.settings
-		
+
 	def getOffsets(self):
 		return self.offset
 
@@ -192,7 +193,7 @@ class PrayTimes():
 		self.timeZone = timezone + (1 if dst else 0)
 		self.jDate = self.julian(date[0], date[1], date[2]) - self.lng / (15 * 24.0)
 		return self.computeTimes()
-	
+
 	# convert float time to the given format (see timeFormats)
 	def getFormattedTime(self, time, format, suffixes = None):
 		if math.isnan(time):
@@ -204,13 +205,47 @@ class PrayTimes():
 
 		time = self.fixhour(time+ 0.5/ 60)  # add 0.5 minutes to round
 		hours = math.floor(time)
-		
+
 		minutes = math.floor((time- hours)* 60)
 		suffix = suffixes[ 0 if hours < 12 else 1 ] if format == '12h' else ''
 		formattedTime = "%02d:%02d" % (hours, minutes) if format == "24h" else "%d:%02d" % ((hours+11)%12+1, minutes)
 		return formattedTime + suffix
 
-	
+	def nextSalat(self, coords, timezone, dst = 0, format = None):
+		now = datetime.now()
+		self.lat = coords[0]
+		self.lng = coords[1]
+		self.elv = coords[2] if len(coords)>2 else 0
+		if format != None:
+			self.timeFormat = format
+		if type(now).__name__ == 'datetime':
+			today = (now.year, now.month, now.day)
+		self.timeZone = timezone + (1 if dst else 0)
+		self.jDate = self.julian(today[0], today[1], today[2]) - self.lng / (15 * 24.0)
+		times = self.computeTimes()
+		for i in ['Fajr', 'Sunrise', 'Dhuhr', 'Asr', 'Maghrib', 'Isha']:
+			if self.timeGreater(times[i.lower()], (str(now.hour) + ":" + str(now.minute))):
+				return "%s : %s" % (i,times[i.lower()])
+		# if we are here, the next Prayer is the Fajr of tomorrow
+		tomorrow = now.date() + timedelta(days=1)
+                if type(tomorrow).__name__ == 'date':
+                        tomorrow = (tomorrow.year, tomorrow.month, tomorrow.day)
+                self.timeZone = timezone + (1 if dst else 0)
+                self.jDate = self.julian(tomorrow[0], tomorrow[1], tomorrow[2]) - self.lng / (15 * 24.0)
+                times = self.computeTimes()
+                for i in ['Fajr']:
+			return "%s : %s" % (i, times[i.lower()])
+
+	# verify if time1 is strictly greater than time2
+	# time1 : "23:59"
+	# time2 : "07:31"
+	# return True if yes, False else
+	def timeGreater(self, time1, time2):
+    		return time1.split(':')[0] > time2.split(':')[0] and time1.split(':')[1] > time2.split(':')[1]
+
+	def timeToNextSalat(self):
+		return True
+
 	#---------------------- Calculation Functions -----------------------
 
 	# compute mid-day time
@@ -218,7 +253,7 @@ class PrayTimes():
 		eqt = self.sunPosition(self.jDate + time)[1]
 		return self.fixhour(12 - eqt)
 
-	# compute the time at which sun reaches a specific angle below horizon 
+	# compute the time at which sun reaches a specific angle below horizon
 	def sunAngleTime(self, angle, time, direction = None):
 		try:
 			decl = self.sunPosition(self.jDate + time)[0]
@@ -230,7 +265,7 @@ class PrayTimes():
 			return float('nan')
 
 	# compute asr time
-	def asrTime(self, factor, time): 
+	def asrTime(self, factor, time):
 		decl = self.sunPosition(self.jDate + time)[0]
 		angle = -self.arccot(factor + self.tan(abs(self.lat - decl)))
 		return self.sunAngleTime(angle, time)
@@ -251,7 +286,7 @@ class PrayTimes():
 		decl = self.arcsin(self.sin(e)* self.sin(L))
 
 		return (decl, eqt)
-		
+
 	# convert Gregorian date to Julian day
 	# Ref: Astronomical Algorithms by Jean Meeus
 	def julian(self, year, month, day):
@@ -270,7 +305,7 @@ class PrayTimes():
 	def computePrayerTimes(self, times):
 		times = self.dayPortion(times)
 		params = self.settings
-		
+
 		imsak   = self.sunAngleTime(self.eval(params['imsak']), times['imsak'], 'ccw')
 		fajr    = self.sunAngleTime(self.eval(params['fajr']), times['fajr'], 'ccw')
 		sunrise = self.sunAngleTime(self.riseSetAngle(self.elv), times['sunrise'], 'ccw')
@@ -278,7 +313,7 @@ class PrayTimes():
 		asr     = self.asrTime(self.asrFactor(params['asr']), times['asr'])
 		sunset  = self.sunAngleTime(self.riseSetAngle(self.elv), times['sunset'])
 		maghrib = self.sunAngleTime(self.eval(params['maghrib']), times['maghrib'])
-		isha    = self.sunAngleTime(self.eval(params['isha']), times['isha']) 
+		isha    = self.sunAngleTime(self.eval(params['isha']), times['isha'])
 		return {
 			'imsak': imsak, 'fajr': fajr, 'sunrise': sunrise, 'dhuhr': dhuhr,
 			'asr': asr, 'sunset': sunset, 'maghrib': maghrib, 'isha': isha
@@ -302,7 +337,7 @@ class PrayTimes():
 
 		times = self.tuneTimes(times)
 		return self.modifyFormats(times)
-		
+
 	# adjust times in a prayer time array
 	def adjustTimes(self, times):
 		params = self.settings
@@ -346,7 +381,7 @@ class PrayTimes():
 		for name, value in times.items():
 			times[name] = self.getFormattedTime(times[name], self.timeFormat)
 		return times
-	
+
 	# adjust times for locations in higher latitudes
 	def adjustHighLats(self, times):
 		params = self.settings
@@ -381,7 +416,7 @@ class PrayTimes():
 			times[i] /= 24.0
 		return times
 
-	
+
 	#---------------------- Misc Functions -----------------------
 
 	# compute the difference between two times
@@ -432,10 +467,14 @@ prayTimes = PrayTimes()
 if __name__ == "__main__":
 	from datetime import date
 	ipinfo = IpInfo()
-        pt = PrayTimes()
+	pt = PrayTimes()
 	pt.setMethod('UOIF')
-        print('\nPrayer Times for today in %s with %s methode calculation\n' % (ipinfo.getCity(), pt.calcMethod) + ('='* 41))
-        times = pt.getTimes(date.today(), (ipinfo.getLongitude(), ipinfo.getLatitude()), +1);
-        for i in ['Fajr', 'Sunrise', 'Dhuhr', 'Asr', 'Maghrib', 'Isha', 'Midnight']:
-                print(i+ ': '+ times[i.lower()])
-
+	print('\nPrayer Times for today in %s with %s methode calculation\n' % (ipinfo.getCity(), pt.calcMethod) + ('='* 41))
+	times = pt.getTimes(date.today(), (ipinfo.getLongitude(), ipinfo.getLatitude()), +1)
+	for i in ['Fajr', 'Sunrise', 'Dhuhr', 'Asr', 'Maghrib', 'Isha', 'Midnight']:
+		print(i+ ': '+ times[i.lower()])
+	print
+        print "Next Salat : "
+	print ('='* 41)
+	print pt.nextSalat((ipinfo.getLongitude(), ipinfo.getLatitude()), +1)
+	print
